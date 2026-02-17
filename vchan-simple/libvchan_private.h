@@ -28,17 +28,31 @@
 #include "libvchan.h"
 #include "ring.h"
 
+enum vchan_transport {
+    VCHAN_TRANSPORT_UNIX = 0,
+    VCHAN_TRANSPORT_VSOCK = 1,
+};
+
 struct libvchan {
     char *socket_path;
     int server_fd;
     int socket_fd;
     // distinguish VCHAN_WAITING vs. VCHAN_DISCONNECTED
     bool is_new;
+    // blocking mode (default true)
+    bool blocking;
+
+    enum vchan_transport transport;
+    unsigned int vsock_cid;
+    unsigned int vsock_port;
+
     struct ring read_ring;
     int connect_watch_fd;
 };
 
 int libvchan__listen(const char *socket_path);
 int libvchan__connect(const char *socket_path);
+int libvchan__listen_vsock(unsigned int cid, unsigned int port);
+int libvchan__connect_vsock(unsigned int cid, unsigned int port);
 
 #endif

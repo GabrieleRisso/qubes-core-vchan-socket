@@ -21,6 +21,7 @@
 
 #include <sys/socket.h>
 #include <sys/un.h>
+#include <linux/vm_sockets.h>
 #include <stdio.h>
 #include <signal.h>
 #include <unistd.h>
@@ -278,4 +279,69 @@ void change_state(libvchan_t *ctrl, int state) {
     if (write(ctrl->socket_event_pipe[1], &byte, 1) != 1)
         perror("write");
     pthread_mutex_unlock(&ctrl->mutex);
+}
+
+int libvchan__listen_vsock(unsigned int cid, unsigned int port) {
+    int server_fd;
+    (void)cid;
+
+    server_fd = socket(AF_VSOCK, SOCK_STREAM|SOCK_CLOEXEC|SOCK_NONBLOCK, 0);
+    if (server_fd < 0) {
+        perror("socket vsock");
+        return -1;
+    }
+
+    struct sockaddr_vm addr;
+    memset(&addr, 0, sizeof(addr));
+    addr.svm_family = AF_VSOCK;
+    addr.svm_cid = VMADDR_CID_ANY;
+    addr.svm_port = port;
+    if (bind(server_fd, (struct sockaddr *)&addr, sizeof(addr))) {
+        perror("bind vsock");
+        close(server_fd);
+        return -1;
+    }
+    if (listen(server_fd, 1)) {
+        perror("listen vsock");
+        close(server_fd);
+        return -1;
+    }
+
+    return server_fd;
+}
+
+int libvchan__connect_vsock(unsigned int cid, unsigned int port) {
+    struct sockaddr_vm addr;
+    memset(&addr, 0, sizeof(addr));
+    addr.svm_family = AF_VSOCK;
+    addr.svm_cid = cid;
+    addr.svm_port = port;
+
+    struct timespec ts;
+    ts.tv_sec = 0;
+    ts.tv_nsec = CONNECT_DELAY_MS * 1000000;
+
+    int socket_fd = socket(AF_VSOCK, SOCK_STREAM|SOCK_CLOEXEC, 0);
+    if (socket_fd < 0) {
+        perror("socket vsock");
+        return -1;
+    }
+
+    while (connect(socket_fd, (struct sockaddr *)&addr, sizeof(addr))) {
+        if (errno != ECONNREFUSED && errno != ENOENT &&
+            errno != ETIMEDOUT && errno != ECONNRESET) {
+            perror("connect vsock");
+            close(socket_fd);
+            return -1;
+        }
+        nanosleep(&ts, NULL);
+    }
+
+    if (fcntl(socket_fd, F_SETFL, O_NONBLOCK)) {
+        perror("fcntl vsock");
+        close(socket_fd);
+        return -1;
+    }
+
+    return socket_fd;
 }

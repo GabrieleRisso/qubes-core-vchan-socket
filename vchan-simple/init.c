@@ -31,10 +31,24 @@
 #include "libvchan_private.h"
 
 #define SOCKET_DIR "/var/run/vchan"
+#define VSOCK_PORT_BASE 10000
 
-static int get_current_domain() {
+static int get_current_domain(void) {
     const char *s = getenv("VCHAN_DOMAIN");
     return s ? atoi(s) : 0;
+}
+
+static enum vchan_transport get_transport(void) {
+    const char *t = getenv("VCHAN_TRANSPORT");
+    if (t && strcmp(t, "vsock") == 0)
+        return VCHAN_TRANSPORT_VSOCK;
+    return VCHAN_TRANSPORT_UNIX;
+}
+
+static unsigned int vchan_to_vsock_port(int client_domain, int port) {
+    const char *base_str = getenv("VCHAN_VSOCK_BASE_PORT");
+    unsigned int base = base_str ? (unsigned int)atoi(base_str) : VSOCK_PORT_BASE;
+    return base + (unsigned int)client_domain * 1000 + (unsigned int)port;
 }
 
 static libvchan_t *init(
@@ -49,16 +63,23 @@ static libvchan_t *init(
     ctrl->server_fd = -1;
     ctrl->socket_fd = -1;
     ctrl->is_new = true;
+    ctrl->blocking = true;
+    ctrl->transport = get_transport();
 
-    const char *socket_dir = getenv("VCHAN_SOCKET_DIR");
-    if (!socket_dir)
-        socket_dir = SOCKET_DIR;
+    if (ctrl->transport == VCHAN_TRANSPORT_VSOCK) {
+        ctrl->vsock_cid = (unsigned int)server_domain;
+        ctrl->vsock_port = vchan_to_vsock_port(client_domain, port);
+    } else {
+        const char *socket_dir = getenv("VCHAN_SOCKET_DIR");
+        if (!socket_dir)
+            socket_dir = SOCKET_DIR;
 
-    if (asprintf(&ctrl->socket_path, "%s/vchan.%d.%d.%d.sock",
-                 socket_dir, server_domain, client_domain, port) < 0) {
-        perror("asprintf");
-        free(ctrl);
-        return NULL;
+        if (asprintf(&ctrl->socket_path, "%s/vchan.%d.%d.%d.sock",
+                     socket_dir, server_domain, client_domain, port) < 0) {
+            perror("asprintf");
+            free(ctrl);
+            return NULL;
+        }
     }
 
     if (ring_init(&ctrl->read_ring, read_min) < 0) {
@@ -78,7 +99,12 @@ libvchan_t *libvchan_server_init(int domain, int port,
         return NULL;
     }
 
-    ctrl->server_fd = libvchan__listen(ctrl->socket_path);
+    if (ctrl->transport == VCHAN_TRANSPORT_VSOCK) {
+        ctrl->server_fd = libvchan__listen_vsock(ctrl->vsock_cid,
+                                                  ctrl->vsock_port);
+    } else {
+        ctrl->server_fd = libvchan__listen(ctrl->socket_path);
+    }
     if (ctrl->server_fd < 0) {
         libvchan_close(ctrl);
         return NULL;
@@ -94,7 +120,12 @@ libvchan_t *libvchan_client_init(int domain, int port) {
         return NULL;
     }
 
-    ctrl->socket_fd = libvchan__connect(ctrl->socket_path);
+    if (ctrl->transport == VCHAN_TRANSPORT_VSOCK) {
+        ctrl->socket_fd = libvchan__connect_vsock(ctrl->vsock_cid,
+                                                   ctrl->vsock_port);
+    } else {
+        ctrl->socket_fd = libvchan__connect(ctrl->socket_path);
+    }
     if (ctrl->socket_fd < 0) {
         libvchan_close(ctrl);
         return NULL;

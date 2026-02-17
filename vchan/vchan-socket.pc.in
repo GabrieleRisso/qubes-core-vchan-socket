@@ -2,6 +2,7 @@ prefix=@PREFIX@
 exec_prefix=${prefix}
 includedir=@INCLUDEDIR@
 libdir=@LIBDIR@
+backend_vmm=socket
 
 Name: vchan-socket
 Description: The vchan communication library (socket version)

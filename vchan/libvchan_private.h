@@ -28,10 +28,20 @@
 #include "libvchan.h"
 #include "ring.h"
 
+enum vchan_transport {
+    VCHAN_TRANSPORT_UNIX = 0,
+    VCHAN_TRANSPORT_VSOCK = 1,
+};
+
 struct libvchan {
     char *socket_path;
     // server socket (for server), connection (for client)
     int socket_fd;
+
+    enum vchan_transport transport;
+    /* vsock parameters (used when transport == VCHAN_TRANSPORT_VSOCK) */
+    unsigned int vsock_cid;
+    unsigned int vsock_port;
 
     // Controls access to rings and state
     pthread_mutex_t mutex;
@@ -60,6 +70,10 @@ struct libvchan {
 
     // used for cleanup after libvchan_client_init_async()
     int connect_watch_fd;
+
+    // blocking mode: if true, reads/writes block until data is available/space
+    // is free (default). If false, return immediately with partial results.
+    volatile int blocking;
 };
 
 void *libvchan__server(void *arg);
@@ -67,5 +81,7 @@ void *libvchan__client(void *arg);
 int libvchan__drain_pipe(int fd);
 int libvchan__listen(const char *socket_path);
 int libvchan__connect(const char *socket_path);
+int libvchan__listen_vsock(unsigned int cid, unsigned int port);
+int libvchan__connect_vsock(unsigned int cid, unsigned int port);
 
 #endif

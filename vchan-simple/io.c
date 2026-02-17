@@ -267,3 +267,7 @@ static void close_socket(libvchan_t *ctrl) {
     ctrl->socket_fd = -1;
     ctrl->is_new = false;
 }
+
+void libvchan_set_blocking(libvchan_t *ctrl, bool blocking) {
+    ctrl->blocking = blocking;
+}

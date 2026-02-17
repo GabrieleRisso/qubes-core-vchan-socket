@@ -29,10 +29,14 @@ Group:		Qubes
 Vendor:		Invisible Things Lab
 URL:		http://www.qubes-os.org
 BuildRequires: gcc
+Provides:	qubes-libvchan = %{version}-%{release}
+Provides:	qubes-core-libs = %{version}-%{release}
+Conflicts:	qubes-libvchan-xen
 Source0:    %{name}-%{version}.tar.gz
 
 %description
 Socket version of Qubes vchan communication library.
+Drop-in replacement for qubes-libvchan-xen for KVM-based deployments.
 
 %prep
 %setup -q
@@ -62,12 +66,18 @@ License:        GPL v2 only
 Group:          Development/Sources
 Requires:       %{name} = %{version}-%{release}
 Requires:       pkgconfig
+Provides:       qubes-libvchan-devel = %{version}-%{release}
+Provides:       qubes-core-vm-devel = %{version}-%{release}
+Provides:       qubes-core-libs-devel = %{version}-%{release}
+Conflicts:      qubes-libvchan-xen-devel
 
 %description devel
+Development headers and pkg-config files for the socket-based vchan library.
 
 %files devel
 %{_includedir}/vchan-socket/libvchan.h
 %{_libdir}/pkgconfig/vchan-socket.pc
+%{_libdir}/pkgconfig/vchan.pc
 %{_includedir}/vchan-socket-simple/libvchan.h
 %{_libdir}/pkgconfig/vchan-socket-simple.pc
 

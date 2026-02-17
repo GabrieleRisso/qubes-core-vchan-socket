@@ -52,9 +52,24 @@ static int do_read(libvchan_t *ctrl, void *data, size_t min_size, size_t max_siz
     pthread_mutex_lock(&ctrl->mutex);
 
     size_t size = ring_filled(&ctrl->read_ring);
+
+    if (!ctrl->blocking && size == 0) {
+        pthread_mutex_unlock(&ctrl->mutex);
+        errno = EAGAIN;
+        return 0;
+    }
+
     while (size < min_size) {
         if (ctrl->state == VCHAN_DISCONNECTED)
             break;
+        if (!ctrl->blocking) {
+            /* Non-blocking: return what we have or 0 */
+            if (size > 0)
+                break;
+            pthread_mutex_unlock(&ctrl->mutex);
+            errno = EAGAIN;
+            return 0;
+        }
         pthread_mutex_unlock(&ctrl->mutex);
         if (libvchan_wait(ctrl) < 0) {
             return -1;
@@ -63,8 +78,8 @@ static int do_read(libvchan_t *ctrl, void *data, size_t min_size, size_t max_siz
         size = ring_filled(&ctrl->read_ring);
     }
 
-    // Disconnected too early?
-    if (size < min_size) {
+    /* Disconnected before min_size available (blocking mode only) */
+    if (size == 0 && ctrl->state == VCHAN_DISCONNECTED) {
         pthread_mutex_unlock(&ctrl->mutex);
         return -1;
     }
@@ -94,9 +109,28 @@ static int do_write(libvchan_t *ctrl, const void *data,
     pthread_mutex_lock(&ctrl->mutex);
 
     size_t size = ring_available(&ctrl->write_ring);
+
+    if (!ctrl->blocking && size == 0) {
+        if (ctrl->state == VCHAN_DISCONNECTED) {
+            pthread_mutex_unlock(&ctrl->mutex);
+            return -1;
+        }
+        pthread_mutex_unlock(&ctrl->mutex);
+        errno = EAGAIN;
+        return 0;
+    }
+
     while (size < min_size) {
         if (ctrl->state == VCHAN_DISCONNECTED)
             break;
+        if (!ctrl->blocking) {
+            /* Non-blocking: return what we can write or 0 */
+            if (size > 0)
+                break;
+            pthread_mutex_unlock(&ctrl->mutex);
+            errno = EAGAIN;
+            return 0;
+        }
         pthread_mutex_unlock(&ctrl->mutex);
         if (libvchan_wait(ctrl) < 0) {
             return -1;
@@ -105,8 +139,8 @@ static int do_write(libvchan_t *ctrl, const void *data,
         size = ring_available(&ctrl->write_ring);
     }
 
-    // Disconnected too early?
-    if (size < min_size || ctrl->state == VCHAN_DISCONNECTED) {
+    /* Disconnected before min_size available */
+    if (size == 0 || ctrl->state == VCHAN_DISCONNECTED) {
         pthread_mutex_unlock(&ctrl->mutex);
         return -1;
     }
@@ -178,4 +212,10 @@ int libvchan_is_open(libvchan_t *ctrl) {
     int result = ctrl->state;
     pthread_mutex_unlock(&ctrl->mutex);
     return result;
+}
+
+void libvchan_set_blocking(libvchan_t *ctrl, bool blocking) {
+    pthread_mutex_lock(&ctrl->mutex);
+    ctrl->blocking = blocking ? 1 : 0;
+    pthread_mutex_unlock(&ctrl->mutex);
 }
