@@ -59,7 +59,19 @@ int libvchan_send(libvchan_t *ctrl, const void *data, size_t size) {
 
 static int do_read(libvchan_t *ctrl, void *data, size_t min_size, size_t max_size) {
     size_t size = ring_filled(&ctrl->read_ring);
+
+    if (!ctrl->blocking && size == 0) {
+        errno = EAGAIN;
+        return 0;
+    }
+
     while (size < min_size) {
+        if (!ctrl->blocking) {
+            if (size > 0)
+                break;
+            errno = EAGAIN;
+            return 0;
+        }
         if (libvchan_wait(ctrl) < 0) {
             return -1;
         }
@@ -68,7 +80,9 @@ static int do_read(libvchan_t *ctrl, void *data, size_t min_size, size_t max_siz
         size = ring_filled(&ctrl->read_ring);
     }
 
-    if (size < min_size)
+    if (size < min_size && ctrl->blocking)
+        return -1;
+    if (size == 0)
         return -1;
 
     if (size > max_size)
@@ -85,15 +99,26 @@ static int do_write(libvchan_t *ctrl, const void *data,
     if (max_size == 0)
         return 0;
 
+    if (!ctrl->blocking && ctrl->socket_fd < 0) {
+        if (libvchan_is_open(ctrl) == VCHAN_DISCONNECTED)
+            return -1;
+        errno = EAGAIN;
+        return 0;
+    }
+
     size_t size = 0;
 
     for (;;) {
         if (ctrl->socket_fd >= 0) {
             int ret = write(ctrl->socket_fd, data + size, max_size - size);
             if (ret < 0) {
-                if (errno == EAGAIN)
+                if (errno == EAGAIN) {
                     ret = 0;
-                else if (errno == EPIPE || errno == ECONNRESET) {
+                    if (!ctrl->blocking && size == 0) {
+                        errno = EAGAIN;
+                        return 0;
+                    }
+                } else if (errno == EPIPE || errno == ECONNRESET) {
                     close_socket(ctrl);
                     ret = 0;
                 } else {
@@ -105,13 +130,25 @@ static int do_write(libvchan_t *ctrl, const void *data,
             if (size >= min_size)
                 break;
 
+            if (!ctrl->blocking) {
+                if (size > 0)
+                    break;
+                errno = EAGAIN;
+                return 0;
+            }
+
             wait_for_write(ctrl);
             if (ctrl->socket_fd < 0)
                 break;
         } else if (libvchan_is_open(ctrl) == VCHAN_DISCONNECTED)
             break;
-        else
+        else {
+            if (!ctrl->blocking) {
+                errno = EAGAIN;
+                return 0;
+            }
             libvchan_wait(ctrl);
+        }
     }
     if (size < min_size)
         return -1;

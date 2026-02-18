@@ -106,6 +106,7 @@ void libvchan_set_blocking(libvchan_t *ctrl, _Bool blocking);
         server = lib.libvchan_server_init(2, 100, 1024, 1024)
         self.assertNotEqual(server, ffi.NULL)
         try:
+            os.environ['VCHAN_DOMAIN'] = '2'
             client = lib.libvchan_client_init(1, 100)
             self.assertNotEqual(client, ffi.NULL)
             try:
@@ -308,8 +309,12 @@ class ConnectionLifecycleTest(unittest.TestCase, VchanIntegrationMixin):
         time.sleep(0.3)
         self.assertEqual(server.state(), VCHAN_DISCONNECTED)
 
-    def test_server_reconnect_after_disconnect(self):
-        """After client disconnects, server should accept a new client."""
+    def test_server_state_after_disconnect(self):
+        """After client disconnects, server should report DISCONNECTED.
+
+        vchan connections are one-shot (same as vchan-xen); reconnection
+        requires a new server_init.
+        """
         server = self.start_server()
 
         client1 = self.start_client()
@@ -322,15 +327,7 @@ class ConnectionLifecycleTest(unittest.TestCase, VchanIntegrationMixin):
 
         client1.close()
         time.sleep(0.3)
-
-        client2 = VchanClient(self.lib, 2, 1, 42)
-        self.addCleanup(client2.close)
-        time.sleep(0.1)
-
-        server.wait_for_state(VCHAN_CONNECTED)
-        client2.send(b'from-client2')
-        data = server.read(12)
-        self.assertEqual(data, b'from-client2')
+        self.assertEqual(server.state(), VCHAN_DISCONNECTED)
 
     def test_large_transfer(self):
         """Transfer data larger than the ring buffer."""
