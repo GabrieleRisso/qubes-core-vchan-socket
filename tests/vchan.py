@@ -49,6 +49,7 @@ int libvchan_is_open(libvchan_t *ctrl);
 
 int libvchan_data_ready(libvchan_t *ctrl);
 int libvchan_buffer_space(libvchan_t *ctrl);
+void libvchan_set_blocking(libvchan_t *ctrl, _Bool blocking);
 """)
 
         self.lib = self.ffi.dlopen(
@@ -115,6 +116,9 @@ int libvchan_buffer_space(libvchan_t *ctrl);
         if result < 0:
             raise VchanException('libvchan_buffer_space')
         return result
+
+    def set_blocking(self, blocking: bool):
+        self.lib.libvchan_set_blocking(self.ctrl, blocking)
 
     def __enter__(self):
         pass
